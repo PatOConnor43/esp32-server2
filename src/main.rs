@@ -1,7 +1,8 @@
 use edge_net::captive::{DnsConf, DnsServer};
 use esp_idf_hal::{peripheral::Peripheral, prelude::Peripherals};
 use esp_idf_svc::http::Method::Get;
-use esp_idf_svc::wifi::{AccessPointConfiguration, AuthMethod, Configuration};
+use esp_idf_svc::netif::{EspNetif, NetifConfiguration, NetifStack};
+use esp_idf_svc::wifi::{AccessPointConfiguration, AuthMethod, Configuration, WifiDriver};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     http::server::EspHttpServer,
@@ -74,7 +75,20 @@ pub fn wifi(
     sysloop: EspSystemEventLoop,
     nvs: Option<EspNvsPartition<NvsDefault>>,
 ) -> anyhow::Result<BlockingWifi<EspWifi<'static>>> {
-    let esp_wifi = EspWifi::new(modem, sysloop.clone(), nvs)?;
+    let ip_conf =
+        esp_idf_svc::ipv4::Configuration::Router(embedded_svc::ipv4::RouterConfiguration {
+            dns: Some(std::net::Ipv4Addr::new(192, 168, 71, 1)),
+            ..Default::default()
+        });
+    let mut conf = NetifConfiguration::wifi_default_router();
+    conf.ip_configuration = ip_conf;
+    let netif = EspNetif::new_with_conf(&conf)?;
+    let esp_wifi = EspWifi::wrap_all(
+        WifiDriver::new(modem, sysloop.clone(), nvs)?,
+        EspNetif::new(NetifStack::Sta)?,
+        netif,
+    )?;
+    //let esp_wifi = EspWifi::new(modem, sysloop.clone(), nvs)?;
     let mut wifi = BlockingWifi::wrap(esp_wifi, sysloop)?;
 
     connect_wifi(&mut wifi)?;
